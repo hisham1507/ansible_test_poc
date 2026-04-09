@@ -1,0 +1,6 @@
+# Ansible
+*.retry
+*.log
+.ansible/
+ansible.log
+*-artifact-*.json

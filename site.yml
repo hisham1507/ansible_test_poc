@@ -1,0 +1,14 @@
+---
+
+- hosts: all
+  name: Ensono Sample Playbook
+  gather_facts: false
+  tasks:
+
+  - name: Run Hello World to the LPAR
+    ansible.builtin.include_role:
+      name: hello_world
+
+  - name: Run z/OS ping
+    ibm.ibm_zos_core.zos_ping:
+

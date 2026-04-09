@@ -1,0 +1,14 @@
+---
+
+- name: "Gathering Host Facts - {{ tower_job_template_name | default('CLI Job') }}"
+  ansible.builtin.setup:
+  register: details
+  environment: "{{ environment_vars | default('') }}"
+
+- name: "Host Connection Details - {{ tower_job_template_name | default('CLI Job') }}"
+  ansible.builtin.debug:
+    msg:
+      - "Connected host is {{ details.ansible_facts.ansible_hostname }}."
+      - "OS family is {{ details.ansible_facts.ansible_distribution }}."
+      - "Connected using {{ details.ansible_facts.ansible_user_id }}."
+      - "Connection Method - {{ bastionhost | default('Direct') }}"

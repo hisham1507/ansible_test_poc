@@ -1,0 +1,106 @@
+---
+- name: Run mainframe job from PDS
+  hosts: all
+  gather_facts: false
+
+  collections:
+    - ibm.ibm_zos_core
+
+  environment:
+    _BPXK_AUTOCVT: "ON"
+    ZOAU_HOME: "/usr/local/ensono/zoautil"
+    LIBPATH: "/usr/local/ensono/zoautil/lib:/usr/local/ensono/python/lib:/lib:/usr/lib:."
+    PATH: "/usr/local/ensono/zoautil/bin:/usr/local/ensono/python/bin:/bin:/usr/sbin:/var/bin"
+    _CEE_RUNOPTS: "FILETAG(AUTOCVT,AUTOTAG) POSIX(ON)"
+    _TAG_REDIR_ERR: "txt"
+    _TAG_REDIR_IN: "txt"
+    _TAG_REDIR_OUT: "txt"
+    LANG: "C"
+
+  vars:
+    snow_instance: "https://dev195100.service-now.com"
+    snow_user: "admin"
+    snow_password: "Vw8epIPUv-=3"
+    snow_assignment_group: "e9eb8071c35843104620e04bb001310e"
+
+  tasks:
+
+    - name: Submit JCL from PDS dataset
+      ibm.ibm_zos_core.zos_job_submit:
+        location: data_set
+        src: "TOMHH.TEST.JCL(CRTFILE)"
+        wait_time_s: 60
+        return_output: true
+      register: job_result
+      ignore_errors: true
+
+    - name: Show job raw result
+      debug:
+        var: job_result
+
+    - name: Determine job failure
+      set_fact:
+        job_failed: >-
+          {{
+            job_result is failed or
+            job_result.jobs is not defined or
+            job_result.jobs | length == 0 or
+            job_result.jobs[0].ret_code is not defined or
+            job_result.jobs[0].ret_code.code is not defined or
+            job_result.jobs[0].ret_code.code | string | length == 0 or
+            job_result.jobs[0].ret_code.code | int != 0
+          }}
+
+    - name: Show derived job_failed flag
+      debug:
+        msg: "job_failed = {{ job_failed }}"
+
+    # -------------------------------------------------
+    # CREATE SERVICENOW INCIDENT ON FAILURE
+    # -------------------------------------------------
+    - name: Create ServiceNow incident if job failed
+      delegate_to: localhost
+      uri:
+        url: "{{ snow_instance }}/api/now/table/incident"
+        method: POST
+        user: "{{ snow_user }}"
+        password: "{{ snow_password }}"
+        force_basic_auth: true
+        headers:
+          Accept: "application/json"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          short_description: "Mainframe Job Failure - {{ job_result.jobs[0].job_name | default('UNKNOWN') }}"
+          description: |
+            Mainframe Batch Job Failure
+
+            Job Name    : {{ job_result.jobs[0].job_name | default('UNKNOWN') }}
+            Job ID      : {{ job_result.jobs[0].job_id | default('UNKNOWN') }}
+            Return Code : {{ job_result.jobs[0].ret_code.code | default('N/A') }}
+            Host        : {{ inventory_hostname }}
+
+            Please investigate.
+          assignment_group: "{{ snow_assignment_group }}"
+          impact: 2
+          urgency: 2
+          state: 1
+        status_code: [200, 201]
+      register: snow_response
+      when: job_failed
+
+    - name: Show ServiceNow incident number
+      delegate_to: localhost
+      debug:
+        msg: "✅ ServiceNow Incident created: {{ snow_response.json.result.number }}"
+      when:
+        - job_failed
+        - snow_response.json.result.number is defined
+
+    # -------------------------------------------------
+    # FAIL PLAY *AFTER* TICKET CREATION
+    # -------------------------------------------------
+    - name: Fail play if job failed
+      fail:
+        msg: "Job failed – ServiceNow incident created."
+      when: job_failed
